@@ -3,16 +3,23 @@ PIP_PATH=/usr/local/bin/pip3
 
 TARGET_DIR = target
 BUILD_DIR = build
-LAMBDAS = $(wildcard *.py)
+LAMBDAS = $(shell grep -lE '\#[[:blank:]]*@FunctionName:' *.py)
 PACKAGES = $(LAMBDAS:%.py=$(TARGET_DIR)/%.zip)
 RECEIPTS = $(LAMBDAS:%.py=$(TARGET_DIR)/%.receipt)
 
 default:
-	@echo "Usage: make build|update"
+	@echo "Usage: make [command]"
+	@echo "Available commands: detect-functions, build, update, create, clean"
+
+detect-functions:
+	@echo $(LAMBDAS)
 
 build: $(PACKAGES)
 
 update: $(RECEIPTS)
+
+clean:
+	@rm -rf $(TARGET_DIR)
 
 ifdef NAME
   CREATE_FUNC_PKG=$(TARGET_DIR)/$(NAME).zip
@@ -35,29 +42,37 @@ $(TARGET_DIR)/%.receipt: $(TARGET_DIR)/%.zip
 	@echo ok
 
 $(TARGET_DIR)/%.zip: %.py
-	@echo -n 'Creating package... '
+	@echo "Found Lambda function in $<"
+	@echo "Creating package..."
 	@out=`$(call create-package,$<,$@)`; \
 	if [ $$? -ne 0 ]; then \
 	echo failed; \
 	echo $$out > build.log; \
 	exit 1; \
 	fi
-	@echo ok
+	@echo "Done"
 
 $(PACKAGES): | $(TARGET_DIR)
 
 $(TARGET_DIR):
-	mkdir $(TARGET_DIR)
+	@mkdir $(TARGET_DIR)
 
 create-package = $(call expand-package-props,$1,$2,$(2:$(TARGET_DIR)/%.zip=%.py))
-expand-package-props = $(call do-create-package,$1,$2,$(call get-property,$3,Requires))
+expand-package-props = $(call do-create-package,$1,$2,$(call get-property,$3,Requires),$(call get-property,$3,Includes))
 do-create-package = \
 	mkdir -p $(BUILD_DIR); \
 	cd $(BUILD_DIR); \
 	echo "[install]\nprefix=\n" > setup.cfg; \
 	cp ../$(1) ./function.py; \
-	if [[ "$(3)" != "" ]]; then $(PIP_PATH) install $(patsubst %,"%",$(3)) --target .; fi; \
-	rm ../$(2); \
+	if [[ "$(3)" != "" ]]; then \
+		echo "Installing packages..."; \
+	    $(foreach pkg,$(3),$(PIP_PATH) install "$(pkg)" --target . || exit 1 ;) \
+	fi; \
+	if [[ "$(4)" != "" ]]; then \
+		echo "Adding dependencies..."; \
+	    $(foreach file,$(4),cp -R "../$(file)" . || exit 1 ;) \
+	fi; \
+	if [[ -f "../$(2)" ]]; then rm ../$(2); fi; \
 	zip -r ../$(2) *; \
 	cd ..; \
 	rm -rf ./$(BUILD_DIR)

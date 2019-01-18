@@ -41,6 +41,7 @@ The available annotations are:
 
 * **@FunctionName:** sets the function name. This is required.
 * **@Requires:** adds the defined PyPI package as an requirement. This can be defined multiple times or you can define all requirements on a single line. But do keep in mind that if you need to set any version definitions, they must not contain any whitespace.
+* **@Includes:** can be used to copy additional files and folders to the deployment package. Behaves exactly like *@Requires*, but performs `cp` on the arguments instead of `pip install`.
 
 And these extra annotations are used when creating new functions:
 
