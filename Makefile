@@ -3,6 +3,7 @@ PIP_PATH=/usr/local/bin/pip3
 
 TARGET_DIR = target
 BUILD_DIR = build
+BUILD_LOG = build.log
 LAMBDAS = $(shell grep -lE '\#[[:blank:]]*@FunctionName:' *.py)
 PACKAGES = $(LAMBDAS:%.py=$(TARGET_DIR)/%.zip)
 RECEIPTS = $(LAMBDAS:%.py=$(TARGET_DIR)/%.receipt)
@@ -12,7 +13,7 @@ default:
 	@echo "Available commands: detect-functions, build, update, create, clean"
 
 detect-functions:
-	@echo $(LAMBDAS)
+	@$(foreach file,$(LAMBDAS),echo $(file): $(call get-property,$(file),FunctionName))
 
 build: $(PACKAGES)
 
@@ -33,49 +34,53 @@ endif
 
 $(TARGET_DIR)/%.receipt: $(TARGET_DIR)/%.zip
 	@echo -n 'Deploying... '
-	@out=`$(call update-function,$(<:$(TARGET_DIR)/%.zip=%.py),$<)`; \
+	@out=`$(call update-function,$(call bundle-function-name,$<),$<)`; \
 	if [ $$? -ne 0 ]; then \
-	echo failed; \
-	exit 1; \
+		echo failed; \
+		exit 1; \
 	fi; \
 	echo $$out > $@
 	@echo ok
 
 $(TARGET_DIR)/%.zip: %.py
 	@echo "Found Lambda function in $<"
-	@echo "Creating package..."
-	@out=`$(call create-package,$<,$@)`; \
+	@echo "Creating deployment bundle..."
+	@$(call create-package,$<,$@); \
 	if [ $$? -ne 0 ]; then \
-	echo failed; \
-	echo $$out > build.log; \
-	exit 1; \
+		echo "Failed to create the package, see $(BUILD_LOG)"; \
+		exit 1; \
 	fi
-	@echo "Done"
+	@echo "Success"
 
 $(PACKAGES): | $(TARGET_DIR)
 
 $(TARGET_DIR):
 	@mkdir $(TARGET_DIR)
 
-create-package = $(call expand-package-props,$1,$2,$(2:$(TARGET_DIR)/%.zip=%.py))
-expand-package-props = $(call do-create-package,$1,$2,$(call get-property,$3,Requires),$(call get-property,$3,Includes))
+create-package = $(call do-create-package,$1,$2,$(call get-property,$1,Requires),$(call get-property,$1,Includes))
 do-create-package = \
+	if [[ ! -f "$(1)" ]]; then \
+		echo "Function source file $(1) does not exist?"; \
+		exit 1; \
+	fi; \
+	touch $(BUILD_LOG); \
 	mkdir -p $(BUILD_DIR); \
 	cd $(BUILD_DIR); \
 	echo "[install]\nprefix=\n" > setup.cfg; \
 	cp ../$(1) ./function.py; \
 	if [[ "$(3)" != "" ]]; then \
-		echo "Installing packages..."; \
-	    $(foreach pkg,$(3),$(PIP_PATH) install "$(pkg)" --target . || exit 1 ;) \
+		echo "  Installing packages..."; \
+		$(foreach pkg,$(3),echo "    + $(pkg)"; $(PIP_PATH) install "$(pkg)" --target . >> ../$(BUILD_LOG) || exit 1 ;) \
 	fi; \
 	if [[ "$(4)" != "" ]]; then \
-		echo "Adding dependencies..."; \
-	    $(foreach file,$(4),cp -R "../$(file)" . || exit 1 ;) \
+		echo "  Adding dependencies..."; \
+		$(foreach file,$(4),echo "    + $(file)"; cp -R "../$(file)" . || exit 1 ;) \
 	fi; \
 	if [[ -f "../$(2)" ]]; then rm ../$(2); fi; \
-	zip -r ../$(2) *; \
+	echo "  Creating archive..."; \
+	zip -r ../$(2) * >> ../$(BUILD_LOG); \
 	cd ..; \
-	rm -rf ./$(BUILD_DIR)
+	rm -rf ./$(BUILD_DIR) ./$(BUILD_LOG)
 
 update-function = \
 	$(AWS_CLI_PATH) lambda update-function-code \
@@ -96,3 +101,4 @@ create-function = \
 get-property = $(shell sed -nEe 's/^.*\#[[:blank:]]*@$(2):[[:blank:]]*(.*)$$/\1/p' $(1))
 timeout = $(if $1,$1,180)
 execution-role = arn:aws:iam::$(shell $(AWS_CLI_PATH) sts get-caller-identity $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),) --output text --query 'Account'):role/$(if $1,$1,basic-lambda-role)
+bundle-function-name = $(1:$(TARGET_DIR)/%.zip=%.py)
