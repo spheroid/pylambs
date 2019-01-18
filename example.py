@@ -1,5 +1,6 @@
 # @FunctionName: ExampleHandler
 # @Includes: hello.py
+# @Region: eu-central-1
 
 from hello import message
 

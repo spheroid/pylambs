@@ -1,13 +1,22 @@
-AWS_CLI_PATH=/usr/bin/env aws
-PIP_PATH=/usr/local/bin/pip3
+# tools
+#
+AWS_CLI	?= /usr/bin/env aws
+PIP		?= /usr/bin/env pip
 
-TARGET_DIR = target
-BUILD_DIR = build
-BUILD_LOG = build.log
+# paths and files
+#
+TARGET_DIR	?= target
+BUILD_DIR 	?= build
+BUILD_LOG 	?= build.log
+
+# target files
+#
 LAMBDAS = $(shell grep -lE '\#[[:blank:]]*@FunctionName:' *.py)
 PACKAGES = $(LAMBDAS:%.py=$(TARGET_DIR)/%.zip)
 RECEIPTS = $(LAMBDAS:%.py=$(TARGET_DIR)/%.receipt)
 
+# build targets
+#
 default:
 	@echo "Usage: make [command]"
 	@echo "Available commands: detect-functions, build, update, create, clean"
@@ -70,7 +79,7 @@ do-create-package = \
 	cp ../$(1) ./function.py; \
 	if [[ "$(3)" != "" ]]; then \
 		echo "  Installing packages..."; \
-		$(foreach pkg,$(3),echo "    + $(pkg)"; $(PIP_PATH) install "$(pkg)" --target . >> ../$(BUILD_LOG) || exit 1 ;) \
+		$(foreach pkg,$(3),echo "    + $(pkg)"; $(PIP) install "$(pkg)" --target . >> ../$(BUILD_LOG) || exit 1 ;) \
 	fi; \
 	if [[ "$(4)" != "" ]]; then \
 		echo "  Adding dependencies..."; \
@@ -82,23 +91,27 @@ do-create-package = \
 	cd ..; \
 	rm -rf ./$(BUILD_DIR) ./$(BUILD_LOG)
 
-update-function = \
-	$(AWS_CLI_PATH) lambda update-function-code \
+update-function = $(call do-update-function,$1,$2,$(call get-property,$1,Region))
+do-update-function = \
+	$(AWS_CLI) lambda update-function-code \
 		--function-name $(call get-property,$1,FunctionName) \
 		--zip-file fileb://$(2) \
-		$(if $(AWS_PROFILE),--profile $(AWS_PROFILE),)
+		$(if $(AWS_PROFILE),--profile "$(AWS_PROFILE)",) \
+		$(if $3,--region "$3",)
 
-create-function = \
-	$(AWS_CLI_PATH) lambda create-function \
+create-function = $(call do-create-function,$1,$2,$(call get-property,$1,Region))
+do-create-function = \
+	$(AWS_CLI) lambda create-function \
 		--function-name $(call get-property,$1,FunctionName) \
 		--zip-file fileb://$(2) \
 		--runtime python3.7 \
 		--role $(call execution-role,$(call get-property,$1,ExecutionRole)) \
 		--timeout $(call timeout,$(call get-property,$1,Timeout)) \
 		--handle function.lambda_handler \
-		$(if $(AWS_PROFILE),--profile $(AWS_PROFILE),)
+		$(if $(AWS_PROFILE),--profile "$(AWS_PROFILE)",) \
+		$(if $3,--region "$3",)
 
 get-property = $(shell sed -nEe 's/^.*\#[[:blank:]]*@$(2):[[:blank:]]*(.*)$$/\1/p' $(1))
 timeout = $(if $1,$1,180)
-execution-role = arn:aws:iam::$(shell $(AWS_CLI_PATH) sts get-caller-identity $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),) --output text --query 'Account'):role/$(if $1,$1,basic-lambda-role)
+execution-role = arn:aws:iam::$(shell $(AWS_CLI) sts get-caller-identity $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),) --output text --query 'Account'):role/$(if $1,$1,basic-lambda-role)
 bundle-function-name = $(1:$(TARGET_DIR)/%.zip=%.py)
