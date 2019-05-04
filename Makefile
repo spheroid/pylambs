@@ -83,7 +83,7 @@ do-create-package = \
 	fi; \
 	if [[ "$(4)" != "" ]]; then \
 		echo "  Adding dependencies..."; \
-		$(foreach file,$(4),echo "    + $(file)"; cp -R "../$(file)" . || exit 1 ;) \
+		$(foreach file,$(4),echo "    + $(file)"; rsync --recursive --exclude __pycache__ "../$(file)" . || exit 1 ;) \
 	fi; \
 	if [[ -f "../$(2)" ]]; then rm ../$(2); fi; \
 	echo "  Creating archive..."; \
